@@ -1,0 +1,11 @@
+{
+  "name": "gentilpedro",
+  "description": "Padrões de desenvolvimento e skills das stacks dos templates gentilpedro.",
+  "author": {
+    "name": "Gentil Pedro"
+  },
+  "homepage": "https://github.com/gentilpedro/claude-skills",
+  "repository": "https://github.com/gentilpedro/claude-skills",
+  "license": "MIT",
+  "keywords": ["skills", "dotnet", "react", "python", "git", "ci-cd", "pt-br"]
+}

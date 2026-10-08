@@ -1,0 +1,102 @@
+name: CI/CD - React/Vite
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20.x"   # ajuste para a versão-alvo do projeto
+
+jobs:
+  build-test:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # Lint e teste só rodam se o package.json declarar os scripts correspondentes,
+      # para não quebrar projetos que ainda não os configuraram.
+      - name: Verificar script de lint
+        id: check_lint
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
+            echo "has_lint=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_lint=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lint
+        if: steps.check_lint.outputs.has_lint == 'true'
+        run: npm run lint
+
+      - name: Verificar script de teste
+        id: check_test
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+            echo "has_test=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_test=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Testes
+        if: steps.check_test.outputs.has_test == 'true'
+        run: npm test -- --run
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload do artefato de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  release:
+    name: Release
+    needs: build-test
+    if: needs.build-test.result == 'success' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Empacotar artefato
+        run: |
+          cd dist
+          zip -r "../release-${{ github.ref_name }}.zip" .
+
+      - name: Criar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-${{ github.ref_name }}.zip
+          generate_release_notes: true

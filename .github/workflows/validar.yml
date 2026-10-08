@@ -1,0 +1,21 @@
+name: Validar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Manifestos e frontmatter
+        run: python scripts/validar.py
+      - name: Sintaxe dos scripts das skills
+        run: |
+          for f in $(find plugins -name '*.sh'); do bash -n "$f"; done
+          python -m py_compile $(find plugins -name '*.py')

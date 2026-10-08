@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "gentilpedro-skills",
+  "metadata": {
+    "description": "Skills pessoais de Gentil Pedro para Claude Code: padrões de Git, revisão, CI/CD, release e as stacks dos templates (.NET DDD/SOLID, Blazor, React + Vite, Python CLI)."
+  },
+  "owner": {
+    "name": "Gentil Pedro"
+  },
+  "plugins": [
+    {
+      "name": "gentilpedro",
+      "description": "Padrões de desenvolvimento e skills das stacks dos templates gentilpedro.",
+      "source": "./plugins/gentilpedro",
+      "category": "development",
+      "homepage": "https://github.com/gentilpedro/claude-skills",
+      "tags": ["skills", "dotnet", "react", "python", "git", "ci-cd", "pt-br"]
+    }
+  ]
+}
