@@ -15,6 +15,19 @@
       "category": "development",
       "homepage": "https://github.com/gentilpedro/claude-skills",
       "tags": ["skills", "dotnet", "react", "python", "git", "ci-cd", "pt-br"]
+    },
+    {
+      "name": "impeccable",
+      "description": "Design de frontend (de Paul Bakaus): 1 skill com 24 comandos (/impeccable polish, audit, critique…) e detecção de anti-padrões. Plugin de terceiros, fixado num commit do repositório original.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/pbakaus/impeccable.git",
+        "path": "plugin",
+        "sha": "114ea1d3838fca73b253af45f873b9c4f5f213c8"
+      },
+      "category": "design",
+      "homepage": "https://impeccable.style",
+      "tags": ["design", "frontend", "ui", "ux", "terceiros"]
     }
   ]
 }

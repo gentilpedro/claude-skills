@@ -1,7 +1,8 @@
 # claude-skills
 
 Marketplace de plugins do Claude Code com as minhas skills pessoais: padrões de Git, revisão,
-CI/CD e release, e as skills das stacks dos meus templates.
+CI/CD e release, e as skills das stacks dos meus templates. Também distribui plugins de terceiros
+que uso em todo projeto, fixados num commit.
 
 ## Instalar
 
@@ -14,6 +15,7 @@ Para usar em qualquer outro projeto:
 ```
 /plugin marketplace add gentilpedro/claude-skills
 /plugin install gentilpedro@gentilpedro-skills
+/plugin install impeccable@gentilpedro-skills     # opcional: design de frontend
 ```
 
 Ou, para deixar fixo num repositório, no `.claude/settings.json` dele:
@@ -48,6 +50,18 @@ Todas ficam no plugin `gentilpedro` e aparecem como `gentilpedro:<skill>`.
 | `blazor-dotnet10` | Apps Blazor .NET 10 |
 | `frontend-react-vite` | Frontends React + TypeScript + Vite + Tailwind |
 | `python-cli` | CLIs Python |
+
+## Plugins de terceiros
+
+Entram no `marketplace.json` apontando para o repositório original, nunca copiados para cá, e
+sempre com `sha` fixado: o código só muda quando o commit for atualizado aqui, depois de revisado.
+
+| Plugin | Origem | Para quê |
+|---|---|---|
+| `impeccable` | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (`plugin/`, Apache 2.0) | Design de frontend: `/impeccable polish`, `audit`, `critique` e mais 21 comandos |
+
+Para atualizar, troque o `sha` pelo commit novo do repositório de origem, leia o que mudou e rode
+`python scripts/validar.py`.
 
 ## Atualizar
 

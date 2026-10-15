@@ -9,6 +9,13 @@ erros: list[str] = []
 
 marketplace = json.loads((RAIZ / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 for plugin in marketplace["plugins"]:
+    if not isinstance(plugin["source"], str):
+        # Plugin de terceiros: vem de outro repositório e só precisa estar fixado num commit.
+        if not plugin["source"].get("sha"):
+            erros.append(f"{plugin['name']}: plugin externo sem 'sha' fixado")
+        else:
+            print(f"ok  {plugin['name']} (externo, {plugin['source']['sha'][:7]})")
+        continue
     pasta = RAIZ / plugin["source"]
     manifesto = pasta / ".claude-plugin/plugin.json"
     if not manifesto.is_file():
