@@ -1,0 +1,18 @@
+# Imagem de produção da VPS para API .NET ou Blazor. Contexto = raiz do repositório:
+#   docker build -f deploy/vps/Dockerfile --build-arg VERSAO=1.2.3 -t __APP__:1.2.3 .
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG VERSAO=0.0.0
+WORKDIR /src
+COPY . .
+# Ajuste para o .csproj do projeto web (no Blazor, o principal, não o .Client).
+RUN dotnet publish src/__PROJETO__/__PROJETO__.csproj -c Release -o /app -p:Version=$VERSAO
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /app .
+# O usuário não-root ($APP_UID = 1654) precisa escrever onde houver volume (uploads etc.).
+# RUN mkdir -p /app/App_Data/uploads && chown -R $APP_UID:$APP_UID /app/App_Data
+USER $APP_UID
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "__PROJETO__.dll"]

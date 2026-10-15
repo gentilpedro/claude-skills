@@ -1,0 +1,114 @@
+#!/bin/bash
+# Deploy genérico das apps em /opt/<app> (skill deploy-vps). Fica em /usr/local/bin/app-deploy.
+#
+# Cada chave de deploy do GitHub Actions fica presa a UMA app pelo forced command em
+# ~deploy/.ssh/authorized_keys:
+#   command="sudo -n /usr/local/bin/app-deploy <app>",restrict ssh-ed25519 ... deploy-<app>@github-actions
+# e só escolhe o subcomando (chega em SSH_ORIGINAL_COMMAND):
+#   set-secrets          stdin: NOME=valor, um por linha; só os nomes listados em SECRETS do deploy.conf
+#   load-image <versão>  stdin: docker save <app>:<versão> | gzip
+#   up <versão>          sobe a versão; volta para a anterior se não ficar saudável
+#   status               versão no ar, imagens guardadas e estado dos containers
+#
+# Como root na VPS (rollback manual, por exemplo): app-deploy <app> up 1.4.2
+#
+# A chave não abre shell, não lê arquivos e não mexe em dados: importar banco é o app-import,
+# que só o root roda.
+set -euo pipefail
+umask 077
+
+APP="${1:-}"; shift || true
+[[ "$APP" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "app inválida: '$APP'" >&2; exit 2; }
+DIR="/opt/$APP"
+[ -f "$DIR/deploy.conf" ] || { echo "$APP não usa o app-deploy (falta $DIR/deploy.conf)" >&2; exit 2; }
+
+if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+  read -r -a ARGS <<< "$SSH_ORIGINAL_COMMAND"
+else
+  ARGS=("$@")
+fi
+CMD="${ARGS[0]:-}"; VER="${ARGS[1]:-}"
+
+PORT=""; HEALTH_PATH="/"; SECRETS=""
+# shellcheck source=/dev/null
+. "$DIR/deploy.conf"
+[[ "$PORT" =~ ^[0-9]+$ ]] || { echo "PORT inválida em deploy.conf" >&2; exit 2; }
+
+cd "$DIR"
+APP_VERSION="$(cat .version 2>/dev/null || true)"
+export APP_VERSION="${APP_VERSION:-none}"
+
+valid_ver() {
+  [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo "versão inválida: '$VER'" >&2; exit 2; }
+}
+
+saudavel() {
+  for _ in $(seq 1 30); do
+    curl -fsS -m 5 -o /dev/null "http://127.0.0.1:${PORT}${HEALTH_PATH}" && return 0
+    sleep 2
+  done
+  return 1
+}
+
+subir() {
+  echo "$1" > .version
+  APP_VERSION="$1" docker compose up -d --wait --wait-timeout 180 web && saudavel
+}
+
+case "$CMD" in
+  set-secrets)
+    TMP=$(mktemp "$DIR/.secrets.XXXX")
+    trap 'rm -f "$TMP"' EXIT
+    while IFS= read -r linha || [ -n "$linha" ]; do
+      [ -z "$linha" ] && continue
+      nome="${linha%%=*}"; valor="${linha#*=}"
+      if [[ "$linha" != *=* || " $SECRETS " != *" $nome "* ]]; then
+        echo "segredo não permitido: '$nome' (libere em SECRETS no deploy.conf)" >&2; exit 2
+      fi
+      # Aspas simples: o Compose lê o valor literalmente, sem interpolar $.
+      [[ "$valor" == *"'"* ]] && { echo "o valor de $nome não pode ter aspas simples" >&2; exit 2; }
+      printf "%s='%s'\n" "$nome" "$valor" >> "$TMP"
+    done
+    mv "$TMP" secrets.env
+    trap - EXIT
+    echo "ok: $(grep -c . secrets.env) segredo(s) gravado(s)" ;;
+
+  load-image)
+    valid_ver
+    TMP=$(mktemp -p /var/tmp "$APP-image.XXXX.tar")
+    trap 'rm -f "$TMP"' EXIT
+    gunzip > "$TMP"
+    # Confere as tags ANTES do docker load: uma imagem chamada postgres:18-alpine sobrescreveria a
+    # do banco. A chave de deploy só pode trazer <app>:<versão>.
+    tags=$(tar -xOf "$TMP" manifest.json | python3 -c \
+      'import json,sys; print(" ".join(t for m in json.load(sys.stdin) for t in (m.get("RepoTags") or [])))')
+    [ "$tags" = "$APP:$VER" ] || { echo "a imagem precisa ter só a tag $APP:$VER (veio: '$tags')" >&2; exit 2; }
+    docker load -i "$TMP" >/dev/null
+    echo "ok: $APP:$VER carregada" ;;
+
+  up)
+    valid_ver
+    docker image inspect "$APP:$VER" >/dev/null 2>&1 || { echo "imagem $APP:$VER não carregada" >&2; exit 1; }
+    PREV="$(cat .version 2>/dev/null || true)"
+    if subir "$VER"; then
+      echo "ok: $APP $VER no ar (antes: ${PREV:-nenhuma})"
+      # Mantém as 3 imagens mais recentes para rollback manual.
+      docker images "$APP" --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' | sort -r | tail -n +4 \
+        | cut -f2 | grep -vx "$APP:$VER" | xargs -r docker rmi >/dev/null || true
+    else
+      echo "erro: $APP $VER não ficou saudável em http://127.0.0.1:${PORT}${HEALTH_PATH}; últimos logs:" >&2
+      APP_VERSION="$VER" docker compose logs --tail 80 web >&2 || true
+      if [ -n "$PREV" ] && [ "$PREV" != "$VER" ] && [ "$PREV" != none ]; then
+        subir "$PREV" >&2 && echo "rollback para $PREV feito" >&2
+      fi
+      exit 1
+    fi ;;
+
+  status)
+    echo "no ar: $APP_VERSION"
+    docker images "$APP" --format '  {{.Repository}}:{{.Tag}}  {{.CreatedSince}}  {{.Size}}'
+    docker compose ps --format '{{.Service}}: {{.Status}}' ;;
+
+  *)
+    echo "comando não permitido: '$CMD'" >&2; exit 2 ;;
+esac

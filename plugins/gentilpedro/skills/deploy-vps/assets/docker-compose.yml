@@ -1,0 +1,60 @@
+# __APP__ em produção na VPS (https://__DOMINIO__). Cópia em /opt/__APP__/docker-compose.yml.
+# Quem sobe o serviço web é o /usr/local/bin/app-deploy, com a imagem __APP__:<versão> enviada
+# pelo próprio deploy (docker save por SSH, sem registry).
+name: __APP__
+
+services:
+  web:
+    image: __APP__:${APP_VERSION:?APP_VERSION não definido}
+    restart: unless-stopped
+    # A VPS tem 3,6 GB para todas as apps: confira a soma dos mem_limit no vps_info.sh.
+    mem_limit: 384m
+    # Só o Nginx do host fala com o app.
+    ports: ["127.0.0.1:__PORTA__:8080"]
+    # .env: senha do Postgres, gerada no servidor. secrets.env: escrito a cada deploy (set-secrets).
+    env_file: [.env, secrets.env]
+    environment:
+      # --- .NET (remova o que não for do stack) ---
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      # 127.0.0.1: o app-deploy confere a saúde por http://127.0.0.1:__PORTA__.
+      AllowedHosts: "__DOMINIO__;localhost;127.0.0.1"
+      # --- Node/Python ---
+      # DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      # Gateway fixo da rede abaixo: é o IP de onde o Nginx do host chega no container. Use como
+      # proxy confiável (KnownProxies no .NET, trust proxy no Express) para ler X-Forwarded-*.
+      PROXY_GATEWAY: __SUBREDE__.1
+    networks: [__APP__]
+    # Volume de arquivos do usuário (uploads), se o app tiver. Liste em BACKUP_VOLUMES no deploy.conf.
+    # volumes:
+    #   - uploads:/app/App_Data/uploads
+    depends_on:
+      db: { condition: service_healthy }
+
+  # Banco próprio da app. Sem banco: apague este serviço, o depends_on acima e o volume pgdata.
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    env_file: .env
+    command: >
+      postgres -c shared_buffers=64MB -c effective_cache_size=192MB
+               -c max_connections=30 -c work_mem=4MB
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [__APP__]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+
+volumes:
+  pgdata:
+  # uploads:
+
+networks:
+  __APP__:
+    ipam:
+      config:
+        - subnet: __SUBREDE__.0/24
+          gateway: __SUBREDE__.1
