@@ -1,0 +1,51 @@
+#!/bin/bash
+# Backup diário de uma app em /opt/<app> (skill deploy-vps): banco (se o compose tiver o serviço
+# db) e os volumes de BACKUP_VOLUMES do deploy.conf; mantém 7 dias. Roda por /etc/cron.d/<app>-backup.
+# Avisa o Healthchecks.io se HC_<APP>_BACKUP_URL estiver em /etc/aamora/monitor.env
+# (app "meu-app" -> HC_MEU_APP_BACKUP_URL).
+set -euo pipefail
+umask 077
+
+APP="${1:-}"
+[[ "$APP" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "uso: app-backup <app>" >&2; exit 2; }
+DIR="/opt/$APP"
+BACKUP_VOLUMES=""
+# shellcheck source=/dev/null
+. "$DIR/deploy.conf"
+
+[ -f /etc/aamora/monitor.env ] && . /etc/aamora/monitor.env
+HC_VAR="HC_$(echo "$APP" | tr 'a-z-' 'A-Z_')_BACKUP_URL"
+HC="${!HC_VAR:-}"
+ping() { [ -n "$HC" ] && curl -fsS -m 10 --retry 3 -o /dev/null "$@" || true; }
+
+ping "$HC/start"
+LOG=$(mktemp)
+trap 'ping --data-binary @"$LOG" "$HC/fail"; rm -f "$LOG" "$DIR"/backups/*.tmp' ERR
+
+cd "$DIR"
+mkdir -p backups
+APP_VERSION="$(cat .version 2>/dev/null || true)"
+export APP_VERSION="${APP_VERSION:-none}"
+HOJE=$(date +%F)
+
+if docker compose config --services | grep -qx db; then
+  OUT="backups/db-$HOJE.dump"
+  docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' 2>>"$LOG" > "$OUT.tmp"
+  docker compose exec -T db pg_restore --list < "$OUT.tmp" >/dev/null 2>>"$LOG"
+  mv "$OUT.tmp" "$OUT"
+  echo "ok: $OUT $(du -h "$OUT" | cut -f1)" >>"$LOG"
+fi
+
+for v in $BACKUP_VOLUMES; do
+  OUT="backups/vol-$v-$HOJE.tar.gz"
+  docker run --rm -v "${APP}_${v}:/v:ro" alpine tar czf - -C /v . 2>>"$LOG" > "$OUT.tmp"
+  mv "$OUT.tmp" "$OUT"
+  echo "ok: $OUT $(du -h "$OUT" | cut -f1)" >>"$LOG"
+done
+
+find backups \( -name 'db-*.dump' -o -name 'vol-*.tar.gz' \) -mtime +7 -delete
+
+trap - ERR
+cat "$LOG"
+ping --data-binary @"$LOG" "$HC"
+rm -f "$LOG"

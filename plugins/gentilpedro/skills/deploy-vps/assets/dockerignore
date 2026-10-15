@@ -1,0 +1,13 @@
+.git
+.github
+.vs
+.vscode
+.idea
+**/bin
+**/obj
+**/node_modules
+dist
+**/TestResults
+*.env
+.env*
+!.env.example

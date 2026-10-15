@@ -1,0 +1,75 @@
+  # Job para colar em .github/workflows/ci-cd.yml (template da skill github-cicd), no mesmo nível
+  # de build-test e release.
+  #
+  # Deploy na VPS (https://__DOMINIO__) — skill deploy-vps. Roda só na tag vX.Y.Z, depois do
+  # build-test: publicar a tag é o "sobe pra produção". A imagem é montada aqui e enviada por SSH
+  # com docker save, sem registry. A VPS_SSH_KEY só consegue rodar "app-deploy __APP__" no
+  # servidor (forced command): não abre shell, não lê arquivos, não mexe em outra app.
+  deploy-vps:
+    name: Deploy na VPS
+    needs: build-test
+    if: needs.build-test.result == 'success' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Nunca dois deploys da mesma app ao mesmo tempo, e nunca cancelar um pela metade.
+    concurrency:
+      group: deploy-vps-__APP__
+      cancel-in-progress: false
+    environment:
+      name: vps
+      url: https://__DOMINIO__
+    env:
+      APP: __APP__
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Versão
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # React/Vite: acrescente --build-arg VITE_API_URL=${{ vars.VITE_API_URL }} (variável, não secret).
+      - name: Montar a imagem
+        run: |
+          docker build -f deploy/vps/Dockerfile --build-arg VERSAO="$VERSION" -t "$APP:$VERSION" .
+          docker save "$APP:$VERSION" | gzip > image.tar.gz
+          ls -lh image.tar.gz
+
+      # VPS_KNOWN_HOSTS fixa a chave do servidor: sem ela o ssh aceitaria qualquer host que
+      # respondesse no IP, e a imagem (e os segredos) iriam para quem estivesse lá.
+      - name: Configurar o SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # Só se o app tiver segredos (SECRETS no deploy/vps/deploy.conf, mesmos nomes). Sem segredos,
+      # apague este passo. Valores de uma linha só, sem aspas simples.
+      - name: Enviar os segredos
+        env:
+          EXEMPLO_API_KEY: ${{ secrets.EXEMPLO_API_KEY }}
+        run: |
+          for nome in EXEMPLO_API_KEY; do
+            [ -n "${!nome}" ] || { echo "::error::secret $nome não cadastrado no repositório"; exit 1; }
+            printf '%s=%s\n' "$nome" "${!nome}"
+          done | ssh -o BatchMode=yes "deploy@${{ secrets.VPS_HOST }}" set-secrets
+
+      - name: Enviar a imagem
+        run: ssh -o BatchMode=yes "deploy@${{ secrets.VPS_HOST }}" load-image "$VERSION" < image.tar.gz
+
+      # O app-deploy espera o container ficar saudável e volta para a versão anterior se não ficar.
+      - name: Subir a versão
+        run: ssh -o BatchMode=yes "deploy@${{ secrets.VPS_HOST }}" up "$VERSION"
+
+      # Confere de fora, pelo caminho real (Cloudflare → Nginx → container).
+      - name: Conferir o site no ar
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS -m 10 -o /dev/null https://__DOMINIO__/health; then echo "ok"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::https://__DOMINIO__/health não respondeu depois do deploy."
+          exit 1

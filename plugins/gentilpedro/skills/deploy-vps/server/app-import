@@ -1,0 +1,42 @@
+#!/bin/bash
+# Importa dados de outro host para uma app em /opt/<app> (skill deploy-vps). Só o root roda: a
+# chave de deploy do GitHub Actions não tem acesso a este script.
+#   app-import <app> db <arquivo.dump>               pg_dump --format=custom. SUBSTITUI o banco inteiro.
+#   app-import <app> volume <volume> <arq.tar.gz> [uid]  extrai no volume <app>_<volume>; uid = dono final
+#
+# Antes de apagar o banco, o atual vai para backups/pre-import-*.dump.
+set -euo pipefail
+umask 077
+
+APP="${1:-}"; CMD="${2:-}"
+[[ "$APP" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "app inválida: '$APP'" >&2; exit 2; }
+DIR="/opt/$APP"
+cd "$DIR"
+mkdir -p backups
+APP_VERSION="$(cat .version 2>/dev/null || true)"
+export APP_VERSION="${APP_VERSION:-none}"
+
+case "$CMD" in
+  db)
+    ARQ="${3:?uso: app-import <app> db <arquivo.dump>}"
+    docker compose exec -T db pg_restore --list < "$ARQ" >/dev/null
+    docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' \
+      > "backups/pre-import-$(date +%F-%H%M%S).dump"
+    docker compose stop web
+    docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+    docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges --exit-on-error' < "$ARQ"
+    docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT schemaname || '"'"'.'"'"' || relname || '"'"': '"'"' || n_live_tup FROM pg_stat_user_tables ORDER BY 1;"'
+    if [ "$APP_VERSION" != none ]; then docker compose up -d --wait --wait-timeout 180 web; fi
+    echo "ok: banco de $APP importado" ;;
+
+  volume)
+    VOL="${3:?uso: app-import <app> volume <volume> <arq.tar.gz> [uid]}"
+    ARQ="${4:?uso: app-import <app> volume <volume> <arq.tar.gz> [uid]}"
+    DONO="${5:-}"
+    docker volume inspect "${APP}_${VOL}" >/dev/null
+    docker run --rm -i -e DONO="$DONO" -v "${APP}_${VOL}:/v" alpine sh -c \
+      'tar xzf - -C /v && { [ -z "$DONO" ] || chown -R "$DONO:$DONO" /v; } && echo "ok: $(find /v -type f | wc -l) arquivos no volume"' < "$ARQ" ;;
+
+  *)
+    echo "uso: app-import <app> db <arquivo.dump> | volume <volume> <arq.tar.gz> [uid]" >&2; exit 2 ;;
+esac

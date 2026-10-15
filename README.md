@@ -42,6 +42,7 @@ Todas ficam no plugin `gentilpedro` e aparecem como `gentilpedro:<skill>`.
 | `code-review` | Revisão transversal antes de considerar uma mudança pronta |
 | `github-cicd` | CI/CD no GitHub Actions desde a criação do projeto |
 | `release-standards` | SemVer, tags, changelog e GitHub Releases |
+| `deploy-vps` | Coloca no ar na VPS aamora.com.br (Docker + Nginx + deploy por Actions) quem está fora dela |
 | `template-standards` | Fonte de verdade dos templates e de como instanciá-los |
 | `api-dotnet-ddd` | APIs .NET 10 do template DDD |
 | `api-dotnet-solid` | APIs .NET 10 do template SOLID |
